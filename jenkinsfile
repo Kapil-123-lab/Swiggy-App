@@ -1,81 +1,139 @@
 pipeline {
-    agent any
+agent any
 
-    tools {
-        jdk 'Jdk21'
-        nodejs 'node23'
+```
+tools {
+    jdk 'Jdk21'
+    nodejs 'node23'
+}
+
+environment {
+    SCANNER_HOME = tool('Sonar-scanner')
+
+    IMAGE_NAME = 'kapilkanaujiya/swiggy'
+    IMAGE_TAG  = "${BUILD_NUMBER}"
+
+    CONTAINER_NAME = 'swiggy'
+}
+
+stages {
+
+    stage('Clean Workspace') {
+        steps {
+            cleanWs()
+        }
     }
 
-    environment {
-        SCANNER_HOME = tool('Sonar-scanner')
-        IMAGE_NAME = 'kapilkanaujiya/swiggy'
+    stage('Checkout Source Code') {
+        steps {
+            git branch: 'master',
+                url: 'https://github.com/Kapil-123-lab/DevOps-Project-Swiggy.git'
+        }
     }
 
-    stages {
-
-        stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
-        }
-
-        stage('Checkout') {
-            steps {
-                git branch: 'master',
-                    url: 'https://github.com/Kapil-123-lab/DevOps-Project-Swiggy.git'
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                bat 'npm install'
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('sonar-server') {
-                    bat """
-                    "%SCANNER_HOME%\\bin\\sonar-scanner.bat" ^
-                    -Dsonar.projectKey=Swiggy ^
-                    -Dsonar.projectName=Swiggy
-                    """
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 10, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('Docker Build') {
-            steps {
-                bat 'docker build -t swiggy .'
-            }
-        }
-
-        stage('Docker Push') {
-            steps {
-                script {
-                    withDockerRegistry(credentialsId: 'docker-creds') {
-                        bat 'docker tag swiggy %IMAGE_NAME%:latest'
-                        bat 'docker push %IMAGE_NAME%:latest'
-                    }
-                }
-            }
-        }
-
-        stage('Deploy Container') {
-            steps {
-                bat '''
-                docker rm -f swiggy
-                docker run -d --name swiggy -p 3000:3000 %IMAGE_NAME%:latest
-                '''
+    stage('Build Display Name') {
+        steps {
+            script {
+                currentBuild.displayName = "#${BUILD_NUMBER} - ${IMAGE_TAG}"
             }
         }
     }
+
+    stage('Install Dependencies') {
+        steps {
+            bat 'npm install'
+        }
+    }
+
+    stage('SonarQube Analysis') {
+        steps {
+            withSonarQubeEnv('sonar-server') {
+                bat """
+                "%SCANNER_HOME%\\bin\\sonar-scanner.bat" ^
+                -Dsonar.projectKey=Swiggy ^
+                -Dsonar.projectName=Swiggy
+                """
+            }
+        }
+    }
+
+    stage('Quality Gate Validation') {
+        steps {
+            timeout(time: 10, unit: 'MINUTES') {
+                waitForQualityGate abortPipeline: true
+            }
+        }
+    }
+
+    stage('Build Docker Image') {
+        steps {
+            bat """
+            docker build ^
+            -t %IMAGE_NAME%:%IMAGE_TAG% ^
+            -t %IMAGE_NAME%:latest .
+            """
+        }
+    }
+
+    stage('Push Docker Image') {
+        steps {
+            script {
+                withDockerRegistry(credentialsId: 'docker-creds') {
+
+                    bat 'docker push %IMAGE_NAME%:%IMAGE_TAG%'
+                    bat 'docker push %IMAGE_NAME%:latest'
+                }
+            }
+        }
+    }
+
+    stage('Deploy Container') {
+        steps {
+            bat """
+            docker rm -f %CONTAINER_NAME% || exit /b 0
+
+            docker run -d ^
+            --name %CONTAINER_NAME% ^
+            -p 3000:3000 ^
+            %IMAGE_NAME%:%IMAGE_TAG%
+            """
+        }
+    }
+
+    stage('Deployment Summary') {
+        steps {
+            echo "========================================"
+            echo "Deployment Successful"
+            echo "Image Name : ${IMAGE_NAME}"
+            echo "Image Tag  : ${IMAGE_TAG}"
+            echo "Container  : ${CONTAINER_NAME}"
+            echo "========================================"
+        }
+    }
+
+    stage('Docker Cleanup') {
+        steps {
+            bat '''
+            docker image prune -f
+            '''
+        }
+    }
+}
+
+post {
+
+    success {
+        echo "Pipeline completed successfully."
+    }
+
+    failure {
+        echo "Pipeline failed. Review logs for details."
+    }
+
+    always {
+        cleanWs()
+    }
+}
+```
+
 }
